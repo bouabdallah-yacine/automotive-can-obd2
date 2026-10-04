@@ -41,7 +41,7 @@ comme la valise d'un garagiste.
 ## Lancer la démo (Wokwi dans VS Code)
 
 1. Ouvre ce dossier dans VS Code → PlatformIO **Build** → **F1 › Wokwi: Start Simulator**.
-2. Ouvre **http://localhost:8180** : le dashboard (compteurs, voyants, trames en direct, diagnostic).
+2. Ouvre **http://localhost:8181** : le dashboard (compteurs, voyants, trames en direct, diagnostic).
    Tourne le potentiomètre (**accélérateur**) ou la pédale de la page web : le régime et la vitesse montent.
 3. Dans le moniteur série, tape :
    - `rpm`, `temp`, `vitesse`, `vin` : requêtes OBD-II, avec les trames brutes ;

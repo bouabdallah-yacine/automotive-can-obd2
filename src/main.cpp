@@ -15,7 +15,7 @@
  *  Le bus transmet chaque trame AU BIT PRÈS (CRC-15, bit stuffing, arbitrage,
  *  trames d'erreur, compteurs TEC/REC, bus-off) : code C portable testé sur PC.
  *
- *  Dashboard web servi par l'ESP32 (http://localhost:8180 avec Wokwi) : compteurs,
+ *  Dashboard web servi par l'ESP32 (http://localhost:8181 avec Wokwi) : compteurs,
  *  voyants, espion du bus en direct, état des calculateurs, diagnostic OBD-II.
  *
  *  Matériel simulé : potentiomètre = pédale d'accélérateur, bouton rouge = frein,
@@ -467,7 +467,7 @@ void setup() {
   server.on("/api/obd", webObd);
   server.on("/api/cmd", webCmd);
   server.begin();
-  Serial.printf("# Dashboard web : http://localhost:8180 (Wi-Fi %s)\n", WiFi.status() == WL_CONNECTED ? "OK" : "non connecte");
+  Serial.printf("# Dashboard web : http://localhost:8181 (Wi-Fi %s)\n", WiFi.status() == WL_CONNECTED ? "OK" : "non connecte");
 }
 
 void loop() {
