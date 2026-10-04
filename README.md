@@ -61,3 +61,7 @@ comme la valise d'un garagiste.
 ```bash
 gcc -O2 -Wall -Wextra -Isrc -o t test/test_can.c src/can.c src/can_bus.c src/obd.c && ./t
 ```
+
+## Licence
+
+© 2026 Yacine — tous droits réservés. Code publié pour consultation uniquement (voir [`LICENSE`](LICENSE)).
