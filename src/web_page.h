@@ -4,7 +4,14 @@ static const char WEB_PAGE[] = R"HTML(<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Réseau CAN</title>
 <style>
-:root{--bg:#0e1214;--panel:#161c1f;--line:#263034;--ink:#e4ebe9;--mut:#83918f;--acc:#4fc3a1;--amb:#f2a33a;--red:#ef5b4c;--blue:#5aa9e6;color-scheme:dark}
+:root{--bg:#0e1214;--panel:#161c1f;--line:#263034;--ink:#e4ebe9;--mut:#83918f;--acc:#4fc3a1;--amb:#f2a33a;--red:#ef5b4c;--blue:#5aa9e6;
+ --btn:#1d2427;--pre:#0b0f10;--st:#1e3b33;--stp:#3d2f17;--sto:#40201c;--warnb:#5a2a24;--warnt:#ffb3aa;color-scheme:dark}
+:root[data-theme="light"]{--bg:#eef1f0;--panel:#ffffff;--line:#d5dcda;--ink:#17201f;--mut:#5f6d6b;--acc:#16876a;--amb:#c77700;--red:#c63a2b;--blue:#2b78c2;
+ --btn:#f4f6f5;--pre:#f6f8f7;--st:#dff1ea;--stp:#fbecd2;--sto:#fadcd7;--warnb:#e8b4ad;--warnt:#a3281b;color-scheme:light}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#eef1f0;--panel:#ffffff;--line:#d5dcda;--ink:#17201f;--mut:#5f6d6b;--acc:#16876a;--amb:#c77700;--red:#c63a2b;--blue:#2b78c2;
+ --btn:#f4f6f5;--pre:#f6f8f7;--st:#dff1ea;--stp:#fbecd2;--sto:#fadcd7;--warnb:#e8b4ad;--warnt:#a3281b;color-scheme:light}}
+#theme{min-width:42px}
+.gt{fill:var(--mut);font-family:ui-monospace,monospace}.gv{fill:var(--ink)}.gtrack{stroke:var(--line)}.gtick{stroke:var(--mut)}.gval{stroke:var(--acc)}.gred{stroke:var(--red)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px}
 main{max-width:1100px;margin:0 auto;display:grid;gap:14px}
 header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px}
@@ -27,16 +34,16 @@ table{width:100%;border-collapse:collapse}td,th{padding:3px 6px;text-align:left;
 tr.err td{color:var(--red)}td.id{font-weight:600}
 .stats{display:flex;flex-wrap:wrap;gap:6px 18px;margin-bottom:10px;color:var(--mut)}.stats b{color:var(--ink)}
 .node{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line)}.node:last-child{border:0}
-.st{font-size:12px;padding:1px 8px;border-radius:99px;background:#1e3b33;color:var(--acc)}.st.passive{background:#3d2f17;color:var(--amb)}.st.off{background:#40201c;color:var(--red)}
+.st{font-size:12px;padding:1px 8px;border-radius:99px;background:var(--st);color:var(--acc)}.st.passive{background:var(--stp);color:var(--amb)}.st.off{background:var(--sto);color:var(--red)}
 .btns{display:flex;flex-wrap:wrap;gap:6px}
-button{font:inherit;background:#1d2427;color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px 11px;cursor:pointer}
-button:hover{border-color:var(--acc)}button.warn{border-color:#5a2a24;color:#ffb3aa}button:focus-visible,input:focus-visible{outline:2px solid var(--acc)}
-pre{margin:10px 0 0;padding:10px;background:#0b0f10;border:1px solid var(--line);border-radius:8px;font-size:12.5px;white-space:pre-wrap;min-height:90px}
+button{font:inherit;background:var(--btn);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px 11px;cursor:pointer}
+button:hover{border-color:var(--acc)}button.warn{border-color:var(--warnb);color:var(--warnt)}button:focus-visible,input:focus-visible{outline:2px solid var(--acc)}
+pre{margin:10px 0 0;padding:10px;background:var(--pre);border:1px solid var(--line);border-radius:8px;font-size:12.5px;white-space:pre-wrap;min-height:90px}
 .ans{color:var(--acc);font-weight:600}
 label{color:var(--mut);font-size:12px}input[type=range]{width:100%;accent-color:var(--acc)}
 </style></head><body><main>
 <header><h1>Réseau CAN automobile <span class="mono" style="color:var(--mut);font-size:13px">500 kbit/s</span></h1>
-<span class="mono" id="conn" style="color:var(--mut)">connexion…</span></header>
+<span style="display:flex;gap:10px;align-items:center"><span class="mono" id="conn" style="color:var(--mut)">connexion…</span><button id="theme" title="Changer de thème" aria-label="Changer de thème">◐</button></span></header>
 
 <section class="cockpit">
  <div class="panel gp"><svg class="g" viewBox="0 0 200 168" id="spd" role="img" aria-label="Compteur de vitesse"></svg></div>
@@ -72,19 +79,25 @@ label{color:var(--mut);font-size:12px}input[type=range]{width:100%;accent-color:
 </section>
 </main><script>
 const $=id=>document.getElementById(id);
+// Thème : suit le système par défaut, le bouton bascule clair / sombre (mémorisé dans le navigateur)
+(function(){const r=document.documentElement;let t=null;try{t=localStorage.getItem('theme')}catch(e){}
+ if(t)r.dataset.theme=t;
+ const cur=()=>r.dataset.theme||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+ const lab=()=>{$('theme').textContent=cur()=='dark'?'☀':'☾';$('theme').title=cur()=='dark'?'Passer en mode clair':'Passer en mode sombre'};
+ $('theme').onclick=()=>{r.dataset.theme=cur()=='dark'?'light':'dark';try{localStorage.setItem('theme',r.dataset.theme)}catch(e){}lab()};lab()})();
 function gauge(el,label,unit,max,step,red){
  const cx=100,cy=105,r=80,a0=-210,a1=30;let s='';
  const pt=(a,rr)=>[cx+rr*Math.cos(a*Math.PI/180),cy+rr*Math.sin(a*Math.PI/180)];
  const arc=(f,t,rr)=>{const[p,q]=pt(f,rr),[u,v]=pt(t,rr);return `M${p} ${q} A${rr} ${rr} 0 ${t-f>180?1:0} 1 ${u} ${v}`};
- s+=`<path d="${arc(a0,a1,r)}" fill="none" stroke="#263034" stroke-width="10"/>`;
- if(red)s+=`<path d="${arc(a0+(a1-a0)*red/max,a1,r)}" fill="none" stroke="#ef5b4c" stroke-width="10" opacity=".7"/>`;
- s+=`<path id="${el.id}_v" d="" fill="none" stroke="#4fc3a1" stroke-width="10"/>`;
+ s+=`<path d="${arc(a0,a1,r)}" fill="none" class="gtrack" stroke-width="10"/>`;
+ if(red)s+=`<path d="${arc(a0+(a1-a0)*red/max,a1,r)}" fill="none" class="gred" stroke-width="10" opacity=".75"/>`;
+ s+=`<path id="${el.id}_v" d="" fill="none" class="gval" stroke-width="10"/>`;
  for(let v=0;v<=max;v+=step){const a=a0+(a1-a0)*v/max,[x1,y1]=pt(a,r-14),[x,y]=pt(a,r-26);
-  s+=`<line x1="${pt(a,r-6)[0]}" y1="${pt(a,r-6)[1]}" x2="${x1}" y2="${y1}" stroke="#83918f"/>`;
-  s+=`<text x="${x}" y="${y+3}" fill="#83918f" font-size="9" text-anchor="middle" font-family="ui-monospace,monospace">${max>1000?v/1000:v}</text>`}
- s+=`<line id="${el.id}_n" x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy-r+16}" stroke="#e4ebe9" stroke-width="3" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="5" fill="#e4ebe9"/>`;
- s+=`<text id="${el.id}_t" x="${cx}" y="${cy+36}" fill="#e4ebe9" font-size="22" font-weight="700" text-anchor="middle" font-family="ui-monospace,monospace">0</text>`;
- s+=`<text x="${cx}" y="${cy+56}" fill="#83918f" font-size="9" text-anchor="middle">${label} · ${unit}${max>1000?' (cadran ×1000)':''}</text>`;
+  s+=`<line x1="${pt(a,r-6)[0]}" y1="${pt(a,r-6)[1]}" x2="${x1}" y2="${y1}" class="gtick"/>`;
+  s+=`<text x="${x}" y="${y+3}" class="gt" font-size="9" text-anchor="middle">${max>1000?v/1000:v}</text>`}
+ s+=`<line id="${el.id}_n" x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy-r+16}" style="stroke:var(--ink)" stroke-width="3" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="5" class="gv"/>`;
+ s+=`<text id="${el.id}_t" x="${cx}" y="${cy+36}" class="gv" font-size="22" font-weight="700" text-anchor="middle" font-family="ui-monospace,monospace">0</text>`;
+ s+=`<text x="${cx}" y="${cy+56}" class="gt" font-size="9" text-anchor="middle">${label} · ${unit}${max>1000?' (cadran ×1000)':''}</text>`;
  el.innerHTML=s;el._g={cx,cy,r,a0,a1,max,arc};
 }
 function setG(el,v){const g=el._g,f=Math.max(0,Math.min(1,v/g.max)),a=g.a0+(g.a1-g.a0)*f;
