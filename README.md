@@ -1,5 +1,7 @@
 # 🚗 Réseau CAN automobile + diagnostic OBD-II (ESP32 + FreeRTOS)
 
+[![Tests](https://github.com/bouabdellah-yacine/automotive-can-obd2/actions/workflows/ci.yml/badge.svg)](https://github.com/bouabdellah-yacine/automotive-can-obd2/actions/workflows/ci.yml)
+
 Une voiture moderne contient des dizaines de calculateurs qui se parlent sur un **bus CAN**. Ce projet
 simule ce réseau avec 4 nœuds (moteur, ABS, tableau de bord, outil de diagnostic) qui échangent des
 trames **au bit près** : CRC-15, bit stuffing, arbitrage, trames d'erreur et mise hors ligne (bus-off)
