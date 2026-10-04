@@ -15,17 +15,24 @@
  *  Le bus transmet chaque trame AU BIT PRÈS (CRC-15, bit stuffing, arbitrage,
  *  trames d'erreur, compteurs TEC/REC, bus-off) : code C portable testé sur PC.
  *
+ *  Dashboard web servi par l'ESP32 (http://localhost:8180 avec Wokwi) : compteurs,
+ *  voyants, espion du bus en direct, état des calculateurs, diagnostic OBD-II.
+ *
  *  Matériel simulé : potentiomètre = pédale d'accélérateur, bouton rouge = frein,
  *  bouton jaune = panne du ventilateur de refroidissement.
  * ============================================================================
  */
 #include <Arduino.h>
+#include <stdarg.h>
+#include <WiFi.h>
+#include <WebServer.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "can.h"
 #include "can_bus.h"
 #include "obd.h"
+#include "web_page.h"
 
 #define PIN_PEDAL   34
 #define PIN_BRAKE   26
@@ -56,6 +63,13 @@ static int busRecv(int node, can_frame_t *f) {
 //  Le bus : transmet les trames en attente (≈ 4 trames max par ms à 500 kbit/s)
 // ---------------------------------------------------------------------------
 struct SniffItem { can_frame_t f; uint8_t sender; int8_t status; uint32_t t; };
+#define WEB_FRAMES 40
+SniffItem webFrames[WEB_FRAMES];             // dernières trames pour le dashboard web (protégé par busMutex)
+uint32_t webSeq = 0;
+WebServer server(80);
+volatile int webPedal = -1;                  // pédale pilotée depuis la page web (-1 = potentiomètre)
+volatile uint32_t webBrakeUntil = 0;
+SemaphoreHandle_t diagMutex;                 // une seule requête de diagnostic à la fois
 
 void taskBus(void *) {
   uint32_t busOffSince[CAN_MAX_NODES] = {0};
@@ -64,6 +78,7 @@ void taskBus(void *) {
       xSemaphoreTake(busMutex, portMAX_DELAY);
       int r = can_bus_step(&bus);
       SniffItem it = { bus.last_frame, (uint8_t)bus.last_sender, (int8_t)r, (uint32_t)millis() };
+      if (r != 0) webFrames[webSeq++ % WEB_FRAMES] = it;
       // Récupération automatique d'un nœud en bus-off au bout de 3 s
       for (int i = 0; i < bus.n_nodes; i++) {
         if (bus.nodes[i].state == NODE_BUS_OFF) {
@@ -104,7 +119,7 @@ void taskEngine(void *) {
   for (;;) {
     vTaskDelayUntil(&last, pdMS_TO_TICKS(10));
     // Physique (100 Hz)
-    float pedal = analogRead(PIN_PEDAL) / 4095.0f * 100.0f;
+    float pedal = webPedal >= 0 ? (float)webPedal : analogRead(PIN_PEDAL) / 4095.0f * 100.0f;
     veh.throttle_pct = pedal;
     float rpmTarget = 800 + pedal * 55;
     veh.rpm += (rpmTarget - veh.rpm) * 0.05f;
@@ -157,7 +172,7 @@ void taskAbs(void *) {
     vTaskDelayUntil(&last, pdMS_TO_TICKS(10));
     can_frame_t in;
     while (busRecv(N_ABS, &in)) if (in.id == ID_ENGINE) throttle = in.data[3] / 2.55f;
-    bool brake = digitalRead(PIN_BRAKE) == LOW;
+    bool brake = digitalRead(PIN_BRAKE) == LOW || millis() < webBrakeUntil;
     float accel = throttle * 0.15f - 0.0004f * speed * speed - (brake ? 30.0f : 0.5f);   // km/h par seconde
     speed = fmaxf(0, speed + accel * 0.01f);
     absActive = brake && speed > 30;                                      // freinage fort à haute vitesse
@@ -174,18 +189,23 @@ void taskAbs(void *) {
 // ---------------------------------------------------------------------------
 //  Tableau de bord : affichage OLED + surveillance du réseau
 // ---------------------------------------------------------------------------
+struct DashState { float rpm, temp, speed; bool mil, absOn, brake, lost; int nDtc; };
+volatile DashState dashState = {};           // ce que le tableau de bord a lu sur le bus
+
 void taskDash(void *) {
-  float rpm = 0, temp = 0, speed = 0; bool mil = false, absOn = false;
+  float rpm = 0, temp = 0, speed = 0; bool mil = false, absOn = false, brake = false;
   uint32_t lastEngine = millis(); int nDtc = 0;
   for (;;) {
     can_frame_t in;
     while (busRecv(N_DASH, &in)) {
       if (in.id == ID_ENGINE) { rpm = in.data[0] << 8 | in.data[1]; temp = in.data[2] - 40.0f; mil = in.data[4]; nDtc = in.data[5]; lastEngine = millis(); }
-      if (in.id == ID_ABS) { speed = (in.data[0] << 8 | in.data[1]) / 100.0f; absOn = in.data[3]; }
+      if (in.id == ID_ABS) { speed = (in.data[0] << 8 | in.data[1]) / 100.0f; brake = in.data[2]; absOn = in.data[3]; }
     }
     bool lost = millis() - lastEngine > 500;                  // plus de 0x0C0 depuis 500 ms
     if (lost && !engineLostComm) Serial.println("# TABLEAU DE BORD : perte de communication avec le moteur (U0100)");
     engineLostComm = lost;
+    dashState.rpm = rpm; dashState.temp = temp; dashState.speed = speed; dashState.mil = mil;
+    dashState.absOn = absOn; dashState.brake = brake; dashState.lost = lost; dashState.nDtc = nDtc;
 
     oled.clearDisplay(); oled.setTextColor(SSD1306_WHITE);
     oled.setTextSize(2); oled.setCursor(0, 0); oled.printf("%3.0f", speed);
@@ -238,26 +258,60 @@ static void printStats() {
   xSemaphoreGive(busMutex);
 }
 
-static void obdRequest(const uint8_t *req, int len) {
+// Résultat d'une requête (pour la page web) ; les mêmes lignes partent sur le moniteur série
+struct ObdResult { char lines[8][72]; int n; char text[200]; };
+
+static void obdLine(ObdResult *r, const char *fmt, ...) {
+  char buf[96]; va_list ap; va_start(ap, fmt); vsnprintf(buf, sizeof buf, fmt, ap); va_end(ap);
+  Serial.println(buf);
+  if (r && r->n < 8) strlcpy(r->lines[r->n++], buf, sizeof r->lines[0]);
+}
+
+static void hexFrame(char *out, size_t n, const char *dir, uint16_t id, const uint8_t *d, int len) {
+  int w = snprintf(out, n, "%s 0x%03X :", dir, id);
+  for (int i = 0; i < len && w < (int)n - 4; i++) w += snprintf(out + w, n - w, " %02X", d[i]);
+}
+
+static void obdRequest(const uint8_t *req, int len, ObdResult *res = nullptr) {
+  xSemaphoreTake(diagMutex, portMAX_DELAY);
+  if (res) { res->n = 0; res->text[0] = 0; }
   can_frame_t f = { OBD_REQ_ID, 8, {0} };
   f.data[0] = (uint8_t)len; memcpy(f.data + 1, req, len);
-  Serial.printf("-> 0x7DF :"); for (int i = 0; i <= len; i++) Serial.printf(" %02X", f.data[i]); Serial.println();
+  char line[96];
+  hexFrame(line, sizeof line, "->", f.id, f.data, len + 1); obdLine(res, "%s", line);
+  can_frame_t junk; while (busRecv(N_DIAG, &junk)) {}               // on vide les vieilles réponses
   busSend(N_DIAG, &f);
   isotp_rx_t rx = {}; uint32_t t0 = millis();
   while (millis() - t0 < 500) {
     can_frame_t in, fc; int sendFc;
     if (busRecv(N_DIAG, &in)) {
-      Serial.printf("<- 0x%03X :", in.id); for (int i = 0; i < in.dlc; i++) Serial.printf(" %02X", in.data[i]); Serial.println();
+      hexFrame(line, sizeof line, "<-", in.id, in.data, in.dlc); obdLine(res, "%s", line);
       if (isotp_rx_feed(&rx, &in, &fc, OBD_ECU_REQ_ID, &sendFc)) {
         char txt[200]; obd_describe(rx.buf, rx.len, txt, sizeof txt);
         Serial.printf("   %s\n", txt);
+        if (res) strlcpy(res->text, txt, sizeof res->text);
+        xSemaphoreGive(diagMutex);
         return;
       }
-      if (sendFc) { Serial.println("-> 0x7E0 : 30 00 00 (controle de flux ISO-TP : envoie la suite)"); busSend(N_DIAG, &fc); }
+      if (sendFc) { obdLine(res, "-> 0x7E0 : 30 00 00   (controle de flux ISO-TP)"); busSend(N_DIAG, &fc); }
     }
     vTaskDelay(2);
   }
   Serial.println("   pas de reponse (calculateur moteur hors ligne ?)");
+  if (res) strlcpy(res->text, "pas de reponse (calculateur moteur hors ligne ?)", sizeof res->text);
+  xSemaphoreGive(diagMutex);
+}
+
+// Raccourcis lisibles → requête OBD-II
+static int obdShortcut(const String &q, uint8_t *req) {
+  if (q == "rpm") { req[0] = 1; req[1] = 0x0C; return 2; }
+  if (q == "temp") { req[0] = 1; req[1] = 0x05; return 2; }
+  if (q == "vitesse") { req[0] = 1; req[1] = 0x0D; return 2; }
+  if (q == "papillon") { req[0] = 1; req[1] = 0x11; return 2; }
+  if (q == "dtc") { req[0] = 3; return 1; }
+  if (q == "clear") { req[0] = 4; return 1; }
+  if (q == "vin") { req[0] = 9; req[1] = 2; return 2; }
+  return 0;
 }
 
 static void help() {
@@ -281,14 +335,8 @@ void taskDiag(void *) {
       if (c != '\n' && c != '\r') { if (line.length() < 40) line += c; continue; }
       line.trim(); line.toLowerCase();
       if (!line.length()) continue;
-      uint8_t req[8]; int n = 0;
-      if (line == "rpm") { req[0] = 1; req[1] = 0x0C; n = 2; }
-      else if (line == "temp") { req[0] = 1; req[1] = 0x05; n = 2; }
-      else if (line == "vitesse") { req[0] = 1; req[1] = 0x0D; n = 2; }
-      else if (line == "papillon") { req[0] = 1; req[1] = 0x11; n = 2; }
-      else if (line == "dtc") { req[0] = 3; n = 1; }
-      else if (line == "clear") { req[0] = 4; n = 1; }
-      else if (line == "vin") { req[0] = 9; req[1] = 2; n = 2; }
+      uint8_t req[8]; int n = obdShortcut(line, req);
+      if (n) {}
       else if (line == "sniff") { sniff = !sniff; Serial.printf("# espion du bus : %s\n", sniff ? "ON" : "OFF"); }
       else if (line == "bits") printBits();
       else if (line == "stats") printStats();
@@ -323,6 +371,70 @@ void taskButtons(void *) {
   }
 }
 
+// ---------------------------------------------------------------------------
+//  Dashboard web (servi par l'ESP32)
+// ---------------------------------------------------------------------------
+static void webState() {
+  static char buf[6144];
+  uint32_t since = server.arg("since").toInt();
+  DashState d; memcpy(&d, (const void *)&dashState, sizeof d);
+  xSemaphoreTake(busMutex, portMAX_DELAY);
+  float elapsed = (millis() - busStartMs) / 1000.0f;
+  int n = snprintf(buf, sizeof buf,
+    "{\"speed\":%.1f,\"rpm\":%.0f,\"temp\":%.1f,\"mil\":%d,\"ndtc\":%d,\"abs\":%d,\"brake\":%d,\"lost\":%d,"
+    "\"pedal\":%d,\"load\":%.2f,\"ok\":%lu,\"err\":%lu,\"arb\":%lu,\"nodes\":[",
+    d.speed, d.rpm, d.temp, d.mil, d.nDtc, d.absOn, d.brake, d.lost, (int)webPedal,
+    elapsed > 0 ? bus.bits_total / (elapsed * CAN_BITRATE) * 100 : 0.0f,
+    (unsigned long)bus.frames_ok, (unsigned long)bus.frames_err, (unsigned long)bus.arbitrations);
+  for (int i = 0; i < bus.n_nodes; i++)
+    n += snprintf(buf + n, sizeof buf - n, "%s{\"name\":\"%s\",\"tec\":%u,\"rec\":%u,\"state\":\"%s\"}", i ? "," : "",
+                  bus.nodes[i].name, bus.nodes[i].tec, bus.nodes[i].rec, can_state_str(bus.nodes[i].state));
+  n += snprintf(buf + n, sizeof buf - n, "],\"lastArb\":\"");
+  if (bus.arb_winner >= 0)
+    n += snprintf(buf + n, sizeof buf - n, "Dernier arbitrage : 0x%03X (%s) gagne contre 0x%03X (%s), perdu au bit %d",
+                  bus.arb_win_id, bus.nodes[bus.arb_winner].name, bus.arb_lose_id, bus.nodes[bus.arb_loser].name, bus.arb_lost_bit);
+  n += snprintf(buf + n, sizeof buf - n, "\",\"frames\":[");
+  uint32_t first = webSeq > WEB_FRAMES ? webSeq - WEB_FRAMES : 0;
+  if (since + 1 > first) first = since + 1 > webSeq ? webSeq : since;
+  bool comma = false;
+  for (uint32_t q = first; q < webSeq && n < (int)sizeof buf - 200; q++) {
+    const SniffItem &it = webFrames[q % WEB_FRAMES];
+    char data[32] = ""; int w = 0;
+    for (int i = 0; i < it.f.dlc && i < 8; i++) w += snprintf(data + w, sizeof data - w, "%s%02X", i ? " " : "", it.f.data[i]);
+    n += snprintf(buf + n, sizeof buf - n, "%s{\"seq\":%lu,\"t\":%lu,\"id\":%u,\"from\":\"%s\",\"dlc\":%u,\"data\":\"%s\",\"err\":%d}",
+                  comma ? "," : "", (unsigned long)(q + 1), (unsigned long)it.t, it.f.id, bus.nodes[it.sender].name, it.f.dlc, data, it.status < 0);
+    comma = true;
+  }
+  xSemaphoreGive(busMutex);
+  snprintf(buf + n, sizeof buf - n, "]}");
+  server.send(200, "application/json", buf);
+}
+
+static void webObd() {
+  uint8_t req[8];
+  int n = obdShortcut(server.arg("q"), req);
+  if (!n) { server.send(400, "application/json", "{\"log\":[],\"text\":\"requete inconnue\"}"); return; }
+  static ObdResult r;
+  obdRequest(req, n, &r);
+  static char buf[1024];
+  int w = snprintf(buf, sizeof buf, "{\"log\":[");
+  for (int i = 0; i < r.n; i++) w += snprintf(buf + w, sizeof buf - w, "%s\"%s\"", i ? "," : "", r.lines[i]);
+  snprintf(buf + w, sizeof buf - w, "],\"text\":\"%s\"}", r.text);
+  server.send(200, "application/json", buf);
+}
+
+static void webCmd() {
+  String c = server.arg("c"), v = server.arg("v");
+  if (c == "pedal") webPedal = constrain(v.toInt(), -1, 100);
+  else if (c == "brake") webBrakeUntil = millis() + 2000;
+  else if (c == "fan") { fanFail = !fanFail; Serial.printf("# Ventilateur (page web) : %s\n", fanFail ? "EN PANNE" : "repare"); }
+  else if (c == "error") {
+    xSemaphoreTake(busMutex, portMAX_DELAY); bus.inject_error = v.toInt(); bus.inject_node = N_ENGINE; xSemaphoreGive(busMutex);
+    Serial.printf("# %d parasites sur les trames du moteur (page web)\n", (int)v.toInt());
+  }
+  server.send(200, "text/plain", "ok");
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_BRAKE, INPUT_PULLUP); pinMode(PIN_FANFAIL, INPUT_PULLUP);
@@ -337,6 +449,7 @@ void setup() {
   N_DIAG   = can_bus_add_node(&bus, "diag", OBD_ECU_RESP_ID, 0x7FF);   // filtre : seulement 0x7E8
   busMutex = xSemaphoreCreateMutex();
   sniffQ = xQueueCreate(64, sizeof(SniffItem));
+  diagMutex = xSemaphoreCreateMutex();
   busStartMs = millis();
 
   Serial.println("\n=== Reseau CAN automobile (500 kbit/s) : moteur 0x0C0, ABS 0x1A0, tableau de bord, diagnostic ===");
@@ -346,6 +459,18 @@ void setup() {
   xTaskCreatePinnedToCore(taskDash,    "dash",    4096, nullptr, 2, nullptr, 0);
   xTaskCreatePinnedToCore(taskDiag,    "diag",    6144, nullptr, 2, nullptr, 0);
   xTaskCreatePinnedToCore(taskButtons, "buttons", 2048, nullptr, 1, nullptr, 0);
+
+  WiFi.begin("Wokwi-GUEST", "", 6);
+  for (int k = 0; k < 40 && WiFi.status() != WL_CONNECTED; k++) delay(250);
+  server.on("/", []() { server.send(200, "text/html; charset=utf-8", WEB_PAGE); });
+  server.on("/api/state", webState);
+  server.on("/api/obd", webObd);
+  server.on("/api/cmd", webCmd);
+  server.begin();
+  Serial.printf("# Dashboard web : http://localhost:8180 (Wi-Fi %s)\n", WiFi.status() == WL_CONNECTED ? "OK" : "non connecte");
 }
 
-void loop() { vTaskDelay(portMAX_DELAY); }
+void loop() {
+  server.handleClient();
+  delay(2);
+}

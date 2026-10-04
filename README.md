@@ -29,6 +29,8 @@ comme la valise d'un garagiste.
 - **ISO-TP (ISO 15765-2)** : le VIN (20 octets) est découpé en *First Frame* + contrôle de flux +
   *Consecutive Frames*.
 - **FreeRTOS** : un calculateur par tâche, bus protégé par un mutex.
+- **Dashboard web servi par l'ESP32** : compteur de vitesse et compte-tours, voyants, **espion du bus en
+  direct** (comme un analyseur CAN), compteurs d'erreurs de chaque calculateur, boutons de diagnostic OBD-II.
 
 ## Résultats des tests (`test/test_can.c`, 13 tests)
 
@@ -39,7 +41,8 @@ comme la valise d'un garagiste.
 ## Lancer la démo (Wokwi dans VS Code)
 
 1. Ouvre ce dossier dans VS Code → PlatformIO **Build** → **F1 › Wokwi: Start Simulator**.
-2. Tourne le potentiomètre (**accélérateur**) : le régime et la vitesse montent sur l'écran.
+2. Ouvre **http://localhost:8180** : le dashboard (compteurs, voyants, trames en direct, diagnostic).
+   Tourne le potentiomètre (**accélérateur**) ou la pédale de la page web : le régime et la vitesse montent.
 3. Dans le moniteur série, tape :
    - `rpm`, `temp`, `vitesse`, `vin` : requêtes OBD-II, avec les trames brutes ;
    - `sniff` : espionne tout le trafic du bus, `bits` : la dernière trame au bit près ;
@@ -49,6 +52,9 @@ comme la valise d'un garagiste.
 5. Tape `error 40` : parasites sur les trames du moteur, son TEC monte jusqu'au **BUS-OFF**, et le tableau de bord
    affiche **PERTE COM MOTEUR U0100**. Le moteur revient sur le réseau 3 s plus tard.
 6. Bouton **rouge « Frein »** à plus de 30 km/h : le voyant **ABS** clignote.
+
+> Si la redirection de port ne fonctionne pas dans ta version de Wokwi, tout le reste marche :
+> écran OLED, voyants et commandes dans le moniteur série.
 
 ## Tests
 
