@@ -3,8 +3,8 @@
 #include <string.h>
 
 /* ---------------------------------------------------------------------------
- *  Codes défauts (DTC) : 2 octets. Les 2 premiers bits donnent la lettre
- *  (P moteur, C châssis, B carrosserie, U réseau), puis 4 chiffres.
+ *  Diagnostic trouble codes (DTC): 2 bytes. The first 2 bits give the letter
+ *  (P powertrain, C chassis, B body, U network), followed by 4 digits.
  * ------------------------------------------------------------------------- */
 uint16_t dtc_encode(const char *s) {
   static const char L[] = "PCBU";
@@ -26,63 +26,63 @@ void dtc_decode(uint16_t v, char out[6]) {
 
 const char *dtc_description(uint16_t v) {
   switch (v) {
-    case 0x0217: return "surchauffe du moteur";
-    case 0x0480: return "commande du ventilateur 1 defaillante";
-    case 0x0300: return "rates d'allumage detectes";
-    case 0x0500: return "capteur de vitesse du vehicule";
-    case 0xC100: return "perte de communication avec le calculateur moteur";
+    case 0x0217: return "engine overheating";
+    case 0x0480: return "cooling fan 1 control circuit malfunction";
+    case 0x0300: return "random/multiple cylinder misfire detected";
+    case 0x0500: return "vehicle speed sensor";
+    case 0xC100: return "lost communication with engine control module";
   }
-  return "code constructeur";
+  return "manufacturer-specific code";
 }
 
 /* ---------------------------------------------------------------------------
- *  Calculateur moteur : réponse aux requêtes OBD-II
+ *  Engine ECU: responses to OBD-II requests
  * ------------------------------------------------------------------------- */
 int obd_handle(vehicle_t *v, const uint8_t *req, int len, uint8_t *r, int max) {
   if (len < 1 || max < 8) return 0;
   uint8_t mode = req[0];
   int n = 0;
-  r[n++] = mode + 0x40;                                         /* réponse positive = mode + 0x40 */
+  r[n++] = mode + 0x40;                                         /* positive response = mode + 0x40 */
   if (mode == 0x01 && len >= 2) {
     uint8_t pid = req[1];
     r[n++] = pid;
     switch (pid) {
-      case 0x00: r[n++] = 0x18; r[n++] = 0x18; r[n++] = 0x80; r[n++] = 0x00; break;  /* PID supportés : 04 05 0C 0D 11 */
+      case 0x00: r[n++] = 0x18; r[n++] = 0x18; r[n++] = 0x80; r[n++] = 0x00; break;  /* supported PIDs: 04 05 0C 0D 11 */
       case 0x04: r[n++] = (uint8_t)(v->load_pct * 255 / 100); break;
       case 0x05: r[n++] = (uint8_t)(v->coolant_c + 40); break;                       /* A - 40 °C */
       case 0x0C: { uint16_t x = (uint16_t)(v->rpm * 4); r[n++] = x >> 8; r[n++] = x & 0xFF; break; }  /* (256A+B)/4 */
       case 0x0D: r[n++] = (uint8_t)v->speed_kmh; break;
       case 0x11: r[n++] = (uint8_t)(v->throttle_pct * 255 / 100); break;
-      default:   r[0] = 0x7F; r[1] = mode; r[2] = 0x12; return 3;                     /* PID non supporté */
+      default:   r[0] = 0x7F; r[1] = mode; r[2] = 0x12; return 3;                     /* PID not supported */
     }
   } else if (mode == 0x03) {
     r[n++] = (uint8_t)v->n_dtc;
     for (int i = 0; i < v->n_dtc && n + 2 <= max; i++) { r[n++] = v->dtc[i] >> 8; r[n++] = v->dtc[i] & 0xFF; }
   } else if (mode == 0x04) {
-    v->n_dtc = 0;                                               /* effacement des défauts */
+    v->n_dtc = 0;                                               /* clear trouble codes */
   } else if (mode == 0x09 && len >= 2 && req[1] == 0x02) {
     r[n++] = 0x02; r[n++] = 0x01;                               /* 1 VIN */
     for (int i = 0; i < 17; i++) r[n++] = (uint8_t)v->vin[i];
   } else {
-    r[0] = 0x7F; r[1] = mode; r[2] = 0x11; return 3;            /* service non supporté */
+    r[0] = 0x7F; r[1] = mode; r[2] = 0x11; return 3;            /* service not supported */
   }
   return n;
 }
 
 void obd_describe(const uint8_t *r, int len, char *out, int max) {
-  if (len >= 3 && r[0] == 0x7F) { snprintf(out, max, "refus du calculateur (code 0x%02X)", r[2]); return; }
+  if (len >= 3 && r[0] == 0x7F) { snprintf(out, max, "negative response from ECU (code 0x%02X)", r[2]); return; }
   if (len >= 3 && r[0] == 0x41) {
     switch (r[1]) {
-      case 0x0C: snprintf(out, max, "Regime moteur : %d tr/min", (r[2] * 256 + r[3]) / 4); return;
-      case 0x0D: snprintf(out, max, "Vitesse : %d km/h", r[2]); return;
-      case 0x05: snprintf(out, max, "Temperature liquide de refroidissement : %d C", r[2] - 40); return;
-      case 0x11: snprintf(out, max, "Position papillon : %d %%", r[2] * 100 / 255); return;
-      case 0x04: snprintf(out, max, "Charge moteur : %d %%", r[2] * 100 / 255); return;
-      case 0x00: snprintf(out, max, "PID supportes : %02X %02X %02X %02X", r[2], r[3], r[4], r[5]); return;
+      case 0x0C: snprintf(out, max, "Engine speed: %d rpm", (r[2] * 256 + r[3]) / 4); return;
+      case 0x0D: snprintf(out, max, "Vehicle speed: %d km/h", r[2]); return;
+      case 0x05: snprintf(out, max, "Coolant temperature: %d C", r[2] - 40); return;
+      case 0x11: snprintf(out, max, "Throttle position: %d %%", r[2] * 100 / 255); return;
+      case 0x04: snprintf(out, max, "Engine load: %d %%", r[2] * 100 / 255); return;
+      case 0x00: snprintf(out, max, "Supported PIDs: %02X %02X %02X %02X", r[2], r[3], r[4], r[5]); return;
     }
   }
   if (len >= 2 && r[0] == 0x43) {
-    int n = r[1], w = snprintf(out, max, "%d code(s) defaut", n);
+    int n = r[1], w = snprintf(out, max, "%d trouble code(s)", n);
     for (int i = 0; i < n && 2 + 2 * i + 1 < len && w < max; i++) {
       char c[6]; uint16_t v = (uint16_t)(r[2 + 2 * i] << 8 | r[3 + 2 * i]);
       dtc_decode(v, c);
@@ -90,14 +90,14 @@ void obd_describe(const uint8_t *r, int len, char *out, int max) {
     }
     return;
   }
-  if (len >= 1 && r[0] == 0x44) { snprintf(out, max, "Codes defaut effaces, voyant moteur eteint"); return; }
-  if (len >= 20 && r[0] == 0x49 && r[1] == 0x02) { snprintf(out, max, "VIN : %.17s", (const char *)r + 3); return; }
-  snprintf(out, max, "reponse inconnue");
+  if (len >= 1 && r[0] == 0x44) { snprintf(out, max, "Trouble codes cleared, check-engine light off"); return; }
+  if (len >= 20 && r[0] == 0x49 && r[1] == 0x02) { snprintf(out, max, "VIN: %.17s", (const char *)r + 3); return; }
+  snprintf(out, max, "unknown response");
 }
 
 /* ---------------------------------------------------------------------------
- *  ISO-TP : SF (simple, ≤ 7 octets) | FF (1re trame, longueur) + CF (suites)
- *  Le récepteur répond à la FF par un contrôle de flux (FC) avant les CF.
+ *  ISO-TP: SF (single, ≤ 7 bytes) | FF (first frame, length) + CF (consecutive)
+ *  The receiver answers the FF with a flow control frame (FC) before the CFs.
  * ------------------------------------------------------------------------- */
 void isotp_tx_start(isotp_tx_t *t, uint16_t id, const uint8_t *data, uint16_t len, can_frame_t *out) {
   t->id = id; t->len = len > sizeof t->buf ? sizeof t->buf : len;
@@ -117,14 +117,14 @@ void isotp_tx_start(isotp_tx_t *t, uint16_t id, const uint8_t *data, uint16_t le
 }
 
 void isotp_tx_flow_control(isotp_tx_t *t, const can_frame_t *fc) {
-  if ((fc->data[0] & 0xF0) == 0x30 && (fc->data[0] & 0x0F) == 0) t->waiting_fc = 0;   /* « continue » */
+  if ((fc->data[0] & 0xF0) == 0x30 && (fc->data[0] & 0x0F) == 0) t->waiting_fc = 0;   /* "continue to send" */
 }
 
 int isotp_tx_next(isotp_tx_t *t, can_frame_t *out) {
   if (t->waiting_fc || t->pos >= t->len) return 0;
   memset(out, 0, sizeof *out);
   out->id = t->id; out->dlc = 8;
-  out->data[0] = 0x20 | (t->sn & 0x0F);                      /* Consecutive Frame + numéro */
+  out->data[0] = 0x20 | (t->sn & 0x0F);                      /* Consecutive Frame + sequence number */
   int k = t->len - t->pos < 7 ? t->len - t->pos : 7;
   memcpy(out->data + 1, t->buf + t->pos, k);
   t->pos += k; t->sn++;
@@ -145,12 +145,12 @@ int isotp_rx_feed(isotp_rx_t *r, const can_frame_t *in, can_frame_t *fc, uint16_
     if (r->len > sizeof r->buf) r->len = sizeof r->buf;
     memcpy(r->buf, in->data + 2, 6); r->got = 6; r->sn = 1; r->active = 1;
     memset(fc, 0, sizeof *fc);
-    fc->id = fc_id; fc->dlc = 8; fc->data[0] = 0x30;         /* FC : continue, sans limite, sans délai */
+    fc->id = fc_id; fc->dlc = 8; fc->data[0] = 0x30;         /* FC: continue, no block limit, no delay */
     *send_fc = 1;
     return 0;
   }
   if (type == 2 && r->active) {                              /* Consecutive Frame */
-    if ((in->data[0] & 0x0F) != (r->sn & 0x0F)) { r->active = 0; return 0; }   /* trame perdue */
+    if ((in->data[0] & 0x0F) != (r->sn & 0x0F)) { r->active = 0; return 0; }   /* frame lost */
     int k = r->len - r->got < 7 ? r->len - r->got : 7;
     memcpy(r->buf + r->got, in->data + 1, k);
     r->got += k; r->sn++;

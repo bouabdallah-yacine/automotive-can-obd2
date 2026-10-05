@@ -1,62 +1,61 @@
-# 🚗 Réseau CAN automobile + diagnostic OBD-II (ESP32 + FreeRTOS)
+# 🚗 Automotive CAN network + OBD-II diagnostics (ESP32 + FreeRTOS)
 
 [![Tests](https://github.com/bouabdellah-yacine/automotive-can-obd2/actions/workflows/ci.yml/badge.svg)](https://github.com/bouabdellah-yacine/automotive-can-obd2/actions/workflows/ci.yml)
 
-Une voiture moderne contient des dizaines de calculateurs qui se parlent sur un **bus CAN**. Ce projet
-simule ce réseau avec 4 nœuds (moteur, ABS, tableau de bord, outil de diagnostic) qui échangent des
-trames **au bit près** : CRC-15, bit stuffing, arbitrage, trames d'erreur et mise hors ligne (bus-off)
-d'un calculateur défaillant. L'outil de diagnostic lit les données et les **codes défauts OBD-II**,
-comme la valise d'un garagiste.
+A modern car contains dozens of ECUs talking to each other over a **CAN bus**. This project
+simulates such a network with 4 nodes (engine, ABS, instrument cluster, diagnostic tool) exchanging
+frames **bit by bit**: CRC-15, bit stuffing, arbitration, error frames and bus-off of a faulty ECU.
+The diagnostic tool reads live data and **OBD-II trouble codes**, just like a mechanic's scan tool.
 
-> ✅ Simulé sur **Wokwi** (VS Code). Le cœur CAN / OBD-II est du C portable testé sur PC.
+> ✅ Simulated on **Wokwi** (VS Code). The CAN / OBD-II core is portable C, tested on a PC.
 
-## Le réseau
+## The network
 
-| Nœud | Émet | Rôle |
+| Node | Transmits | Role |
 |---|---|---|
-| ECU moteur | `0x0C0` toutes les 50 ms | régime, température, papillon, voyant moteur ; répond au diagnostic `0x7E8` |
-| ECU ABS | `0x1A0` toutes les 50 ms | vitesse du véhicule, frein, ABS actif |
-| Tableau de bord | — | affichage OLED, détecte la perte de communication avec le moteur |
-| Outil de diagnostic | `0x7DF`, `0x7E0` | requêtes OBD-II (filtre d'acceptation : ne reçoit que `0x7E8`) |
+| Engine ECU | `0x0C0` every 50 ms | RPM, coolant temperature, throttle, check-engine light; answers diagnostics on `0x7E8` |
+| ABS ECU | `0x1A0` every 50 ms | vehicle speed, brake, ABS active |
+| Instrument cluster | — | OLED display, detects loss of communication with the engine |
+| Diagnostic tool | `0x7DF`, `0x7E0` | OBD-II requests (acceptance filter: receives `0x7E8` only) |
 
-## Ce que montre le projet
+## What the project demonstrates
 
-- **Trame CAN 2.0A au bit près** : SOF, ID 11 bits, DLC, données, **CRC-15** (polynôme 0x4599),
-  **bit stuffing**, ACK, EOF. La commande `bits` affiche la dernière trame telle qu'elle passe sur le câble.
-- **Arbitrage non destructif** : bit dominant 0 contre récessif 1, l'ID le plus petit gagne.
-- **Gestion des erreurs** : parasite détecté, trame d'erreur, réémission automatique ; compteurs
-  **TEC / REC**, états *actif → passif → bus-off* : un calculateur défaillant se déconnecte tout seul.
-- **OBD-II (SAE J1979)** : mode 01 (régime, vitesse, température, papillon), mode 03/04 (lire / effacer
-  les codes défauts **P0217**, **P0480**), mode 09 (VIN).
-- **ISO-TP (ISO 15765-2)** : le VIN (20 octets) est découpé en *First Frame* + contrôle de flux +
+- **Bit-accurate CAN 2.0A frames**: SOF, 11-bit ID, DLC, data, **CRC-15** (polynomial 0x4599),
+  **bit stuffing**, ACK, EOF. The `bits` command prints the last frame exactly as it travels on the wire.
+- **Non-destructive arbitration**: dominant 0 beats recessive 1, the lowest ID wins.
+- **Error handling**: corruption detected, error frame, automatic retransmission; **TEC / REC**
+  counters, *active → passive → bus-off* states: a faulty ECU disconnects itself.
+- **OBD-II (SAE J1979)**: mode 01 (RPM, speed, temperature, throttle), modes 03/04 (read / clear
+  trouble codes **P0217**, **P0480**), mode 09 (VIN).
+- **ISO-TP (ISO 15765-2)**: the VIN (20 bytes) is split into a *First Frame* + flow control +
   *Consecutive Frames*.
-- **FreeRTOS** : un calculateur par tâche, bus protégé par un mutex.
-- **Dashboard web servi par l'ESP32** : compteur de vitesse et compte-tours, voyants, **espion du bus en
-  direct** (comme un analyseur CAN), compteurs d'erreurs de chaque calculateur, boutons de diagnostic OBD-II.
+- **FreeRTOS**: one ECU per task, bus protected by a mutex.
+- **Web dashboard served by the ESP32**: speedometer and tachometer, warning lights, **live bus
+  sniffer** (like a CAN analyser), error counters for each ECU, OBD-II diagnostic buttons.
 
-## Résultats des tests (`test/test_can.c`, 13 tests)
+## Test results (`test/test_can.c`, 13 tests)
 
-- Erreur d'un bit injectée à **chacune des 106 positions** d'une trame : **106 / 106 détectées**.
-- Erreurs doubles : **392 / 392 détectées**.
-- Arbitrage, filtres, réémission, passage en bus-off (TEC ≥ 256), codes défauts, OBD-II, ISO-TP.
+- Single-bit error injected at **each of the 106 positions** of a frame: **106 / 106 detected**.
+- Double-bit errors: **392 / 392 detected**.
+- Arbitration, filters, retransmission, bus-off transition (TEC ≥ 256), trouble codes, OBD-II, ISO-TP.
 
-## Lancer la démo (Wokwi dans VS Code)
+## Running the demo (Wokwi in VS Code)
 
-1. Ouvre ce dossier dans VS Code → PlatformIO **Build** → **F1 › Wokwi: Start Simulator**.
-2. Ouvre **http://localhost:8181** : le dashboard (compteurs, voyants, trames en direct, diagnostic).
-   Tourne le potentiomètre (**accélérateur**) ou la pédale de la page web : le régime et la vitesse montent.
-3. Dans le moniteur série, tape :
-   - `rpm`, `temp`, `vitesse`, `vin` : requêtes OBD-II, avec les trames brutes ;
-   - `sniff` : espionne tout le trafic du bus, `bits` : la dernière trame au bit près ;
-   - `stats` : charge du bus, erreurs, compteurs TEC/REC, dernier arbitrage.
-4. Bouton **jaune « Panne ventilo »** puis accélère : la température dépasse 110 °C, le voyant
-   **CHECK ENGINE** s'allume. Tape `dtc` : **P0480** et **P0217**. Puis `clear` pour les effacer.
-5. Tape `error 40` : parasites sur les trames du moteur, son TEC monte jusqu'au **BUS-OFF**, et le tableau de bord
-   affiche **PERTE COM MOTEUR U0100**. Le moteur revient sur le réseau 3 s plus tard.
-6. Bouton **rouge « Frein »** à plus de 30 km/h : le voyant **ABS** clignote.
+1. Open this folder in VS Code → PlatformIO **Build** → **F1 › Wokwi: Start Simulator**.
+2. Open **http://localhost:8181**: the dashboard (gauges, warning lights, live frames, diagnostics).
+   Turn the potentiometer (**accelerator**) or the pedal on the web page: RPM and speed go up.
+3. In the serial monitor, type:
+   - `rpm`, `temp`, `speed`, `vin`: OBD-II requests, with the raw frames;
+   - `sniff`: monitors all bus traffic, `bits`: the last frame bit by bit;
+   - `stats`: bus load, errors, TEC/REC counters, last arbitration.
+4. Press the **yellow “Fan failure”** button, then accelerate: the temperature exceeds 110 °C and the
+   **CHECK ENGINE** light turns on. Type `dtc`: **P0480** and **P0217**. Then `clear` to erase them.
+5. Type `error 40`: noise on the engine's frames, its TEC climbs until **BUS-OFF**, and the instrument cluster
+   shows **ENGINE COMM LOST U0100**. The engine rejoins the network 3 s later.
+6. Press the **red “Brake”** button above 30 km/h: the **ABS** light flashes.
 
-> Si la redirection de port ne fonctionne pas dans ta version de Wokwi, tout le reste marche :
-> écran OLED, voyants et commandes dans le moniteur série.
+> If port forwarding does not work in your Wokwi version, everything else still works:
+> OLED screen, warning lights and serial monitor commands.
 
 ## Tests
 
@@ -64,6 +63,6 @@ comme la valise d'un garagiste.
 gcc -O2 -Wall -Wextra -Isrc -o t test/test_can.c src/can.c src/can_bus.c src/obd.c && ./t
 ```
 
-## Licence
+## License
 
-© 2026 Yacine — tous droits réservés. Code publié pour consultation uniquement (voir [`LICENSE`](LICENSE)).
+© 2026 Yacine — all rights reserved. Code published for viewing only (see [`LICENSE`](LICENSE)).

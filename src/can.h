@@ -1,14 +1,14 @@
 /*
  * ============================================================================
- *  Couche physique/liaison CAN 2.0A, au bit près (ISO 11898-1)
+ *  CAN 2.0A physical/data link layer, bit-accurate (ISO 11898-1)
  * ============================================================================
- *  Trame standard :  SOF | ID (11) | RTR | IDE | r0 | DLC (4) | données (0..64)
- *                    | CRC (15) | délim. CRC | ACK | délim. ACK | EOF (7)
+ *  Standard frame:   SOF | ID (11) | RTR | IDE | r0 | DLC (4) | data (0..64)
+ *                    | CRC (15) | CRC delim. | ACK | ACK delim. | EOF (7)
  *
- *  - CRC-15 (polynôme 0x4599) calculé de SOF à la fin des données
- *  - bit stuffing : après 5 bits identiques, un bit inverse est inséré
- *  - arbitrage : bit 0 (dominant) écrase bit 1 (récessif) → l'ID le plus
- *    petit gagne sans collision ni perte de temps
+ *  - CRC-15 (polynomial 0x4599) computed from SOF to the end of the data
+ *  - bit stuffing: after 5 identical bits, a complementary bit is inserted
+ *  - arbitration: bit 0 (dominant) overrides bit 1 (recessive) → the lowest
+ *    ID wins with no collision and no time lost
  * ============================================================================
  */
 #pragma once
@@ -24,12 +24,12 @@ typedef struct { uint16_t id; uint8_t dlc; uint8_t data[8]; } can_frame_t;
 typedef enum { CAN_OK = 0, CAN_ERR_STUFF, CAN_ERR_CRC, CAN_ERR_FORM } can_err_t;
 
 uint16_t    can_crc15(const uint8_t *bits, int n);
-/* bits[] = suite de 0/1 telle qu'elle passe sur le bus ; stuff[] (optionnel) = 1 pour un bit de bourrage */
+/* bits[] = sequence of 0/1 as it travels on the bus; stuff[] (optional) = 1 for a stuff bit */
 int         can_encode(const can_frame_t *f, uint8_t *bits, uint8_t *stuff);
 can_err_t   can_decode(const uint8_t *bits, int n, can_frame_t *out);
 const char *can_err_str(can_err_t e);
-/* Arbitrage entre n trames émises en même temps : renvoie l'indice du gagnant,
-   lost_at[i] = bit de l'identifiant où le nœud i a perdu (-1 pour le gagnant) */
+/* Arbitration between n frames sent at the same time: returns the winner's index,
+   lost_at[i] = identifier bit at which node i lost (-1 for the winner) */
 int         can_arbitrate(const can_frame_t *const *cand, int n, int *lost_at);
 
 #ifdef __cplusplus

@@ -1,9 +1,9 @@
 /*
- * Diagnostic OBD-II (SAE J1979) sur CAN avec transport ISO-TP (ISO 15765-2)
- *  - requête fonctionnelle 0x7DF, réponse du calculateur moteur 0x7E8
- *  - mode 01 : données en direct (régime, vitesse, température, papillon, charge)
- *  - mode 03 : lire les codes défauts   - mode 04 : effacer les codes défauts
- *  - mode 09 : numéro de série du véhicule (VIN, 17 caractères → multi-trames ISO-TP)
+ * OBD-II diagnostics (SAE J1979) over CAN with ISO-TP transport (ISO 15765-2)
+ *  - functional request 0x7DF, engine ECU response 0x7E8
+ *  - mode 01: live data (RPM, speed, coolant temperature, throttle, load)
+ *  - mode 03: read trouble codes        - mode 04: clear trouble codes
+ *  - mode 09: vehicle identification number (VIN, 17 characters → ISO-TP multi-frame)
  */
 #pragma once
 #include <stdint.h>
@@ -22,26 +22,26 @@ typedef struct {
   char vin[18];
 } vehicle_t;
 
-/* Codes défauts : "P0217" <-> 0x0217 */
+/* Trouble codes: "P0217" <-> 0x0217 */
 uint16_t dtc_encode(const char *s);
 void     dtc_decode(uint16_t v, char out[6]);
 const char *dtc_description(uint16_t v);
 
-/* Côté calculateur : traite une requête OBD (sans l'octet de longueur ISO-TP) */
+/* ECU side: handles an OBD request (without the ISO-TP length byte) */
 int  obd_handle(vehicle_t *v, const uint8_t *req, int len, uint8_t *resp, int max);
-/* Côté outil de diagnostic : réponse → texte lisible */
+/* Diagnostic tool side: response → human-readable text */
 void obd_describe(const uint8_t *resp, int len, char *out, int max);
 
-/* --- ISO-TP : découpage des messages de plus de 7 octets --- */
+/* --- ISO-TP: segmentation of messages longer than 7 bytes --- */
 typedef struct { uint16_t id; uint8_t buf[64]; uint16_t len, pos; uint8_t sn; int waiting_fc; } isotp_tx_t;
 typedef struct { uint8_t buf[64]; uint16_t len, got; uint8_t sn; int active; } isotp_rx_t;
 
-/* Émetteur : 1re trame (simple ou « First Frame ») */
+/* Sender: first frame (Single Frame or First Frame) */
 void isotp_tx_start(isotp_tx_t *t, uint16_t id, const uint8_t *data, uint16_t len, can_frame_t *out);
-/* Émetteur : trame suivante (« Consecutive Frame ») ; 1 si une trame, 0 si fini ou en attente du contrôle de flux */
+/* Sender: next frame (Consecutive Frame); 1 if a frame was produced, 0 if done or waiting for flow control */
 int  isotp_tx_next(isotp_tx_t *t, can_frame_t *out);
 void isotp_tx_flow_control(isotp_tx_t *t, const can_frame_t *fc);
-/* Récepteur : 1 = message complet ; *send_fc = 1 si une trame de contrôle de flux doit partir (fc) */
+/* Receiver: 1 = message complete; *send_fc = 1 if a flow control frame (fc) must be sent */
 int  isotp_rx_feed(isotp_rx_t *r, const can_frame_t *in, can_frame_t *fc, uint16_t fc_id, int *send_fc);
 
 #ifdef __cplusplus

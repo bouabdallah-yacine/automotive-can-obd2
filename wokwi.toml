@@ -3,7 +3,7 @@ version = 1
 firmware = '.pio/build/esp32/firmware.bin'
 elf = '.pio/build/esp32/firmware.elf'
 
-# Dashboard web de l'ESP32 accessible sur ton PC : http://localhost:8181
+# ESP32 web dashboard reachable from your PC: http://localhost:8181
 [[net.forward]]
 from = "localhost:8181"
 to = "target:80"

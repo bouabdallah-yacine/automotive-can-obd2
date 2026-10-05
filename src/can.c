@@ -26,13 +26,13 @@ int can_encode(const can_frame_t *f, uint8_t *bits, uint8_t *stuff) {
   for (int i = 0; i < dlen; i++) n = put(raw, n, f->data[i], 8);
   n = put(raw, n, can_crc15(raw, n), 15);
 
-  int m = 0, run = 0, last = -1;                   /* bit stuffing de SOF à la fin du CRC */
+  int m = 0, run = 0, last = -1;                   /* bit stuffing from SOF to the end of the CRC */
   for (int i = 0; i < n; i++) {
     bits[m] = raw[i]; if (stuff) stuff[m] = 0; m++;
     run = (raw[i] == last) ? run + 1 : 1; last = raw[i];
     if (run == 5) { bits[m] = !raw[i]; if (stuff) stuff[m] = 1; m++; last = !raw[i]; run = 1; }
   }
-  static const uint8_t tail[] = {1, 0, 1, 1, 1, 1, 1, 1, 1, 1};   /* délim CRC, ACK (acquitté), délim ACK, EOF */
+  static const uint8_t tail[] = {1, 0, 1, 1, 1, 1, 1, 1, 1, 1};   /* CRC delim, ACK (acknowledged), ACK delim, EOF */
   for (unsigned i = 0; i < sizeof tail; i++) { bits[m] = tail[i]; if (stuff) stuff[m] = 0; m++; }
   return m;
 }
@@ -44,9 +44,9 @@ can_err_t can_decode(const uint8_t *bits, int n, can_frame_t *out) {
     if (i >= n) return CAN_ERR_FORM;
     int b = bits[i++];
     run = (b == last) ? run + 1 : 1; last = b;
-    if (run == 6) return CAN_ERR_STUFF;                       /* 6 bits identiques : interdit */
+    if (run == 6) return CAN_ERR_STUFF;                       /* 6 identical bits: forbidden */
     raw[r++] = (uint8_t)b;
-    if (run == 5) {                                           /* le bit suivant doit être un bourrage */
+    if (run == 5) {                                           /* the next bit must be a stuff bit */
       if (i >= n) return CAN_ERR_FORM;
       int s = bits[i++];
       if (s == b) return CAN_ERR_STUFF;
@@ -58,7 +58,7 @@ can_err_t can_decode(const uint8_t *bits, int n, can_frame_t *out) {
     }
   }
   if (raw[0] != 0) return CAN_ERR_FORM;
-  if (can_crc15(raw, need) != 0) return CAN_ERR_CRC;          /* CRC inclus : reste nul si intact */
+  if (can_crc15(raw, need) != 0) return CAN_ERR_CRC;          /* CRC included: remainder is zero if intact */
   if (i + 10 > n || bits[i] != 1 || bits[i + 2] != 1) return CAN_ERR_FORM;
   for (int k = 3; k < 10; k++) if (bits[i + k] != 1) return CAN_ERR_FORM;
 
@@ -74,9 +74,9 @@ can_err_t can_decode(const uint8_t *bits, int n, can_frame_t *out) {
 const char *can_err_str(can_err_t e) {
   switch (e) {
     case CAN_OK: return "OK";
-    case CAN_ERR_STUFF: return "erreur de bourrage (6 bits identiques)";
-    case CAN_ERR_CRC: return "erreur de CRC";
-    case CAN_ERR_FORM: return "erreur de forme";
+    case CAN_ERR_STUFF: return "stuff error (6 identical bits)";
+    case CAN_ERR_CRC: return "CRC error";
+    case CAN_ERR_FORM: return "form error";
   }
   return "?";
 }
@@ -84,9 +84,9 @@ const char *can_err_str(can_err_t e) {
 int can_arbitrate(const can_frame_t *const *c, int n, int *lost_at) {
   int alive[16], winner = -1;
   for (int i = 0; i < n; i++) { alive[i] = 1; if (lost_at) lost_at[i] = -1; }
-  for (int bit = 10; bit >= 0; bit--) {                       /* ID émis du bit de poids fort au plus faible */
+  for (int bit = 10; bit >= 0; bit--) {                       /* ID sent from the most significant bit to the least */
     int bus = 1;
-    for (int i = 0; i < n; i++) if (alive[i]) bus &= (c[i]->id >> bit) & 1;   /* ET câblé */
+    for (int i = 0; i < n; i++) if (alive[i]) bus &= (c[i]->id >> bit) & 1;   /* wired AND */
     for (int i = 0; i < n; i++)
       if (alive[i] && ((c[i]->id >> bit) & 1) != bus) { alive[i] = 0; if (lost_at) lost_at[i] = 10 - bit; }
   }

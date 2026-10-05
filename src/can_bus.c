@@ -9,11 +9,11 @@ static can_frame_t *q_peek(can_queue_t *q) { return q->count ? &q->q[q->head] : 
 static void q_pop(can_queue_t *q) { if (q->count) { q->head = (q->head + 1) % CAN_QLEN; q->count--; } }
 
 const char *can_state_str(can_node_state_t s) {
-  return s == NODE_ERROR_ACTIVE ? "actif" : s == NODE_ERROR_PASSIVE ? "erreur passive" : "BUS-OFF";
+  return s == NODE_ERROR_ACTIVE ? "active" : s == NODE_ERROR_PASSIVE ? "error passive" : "BUS-OFF";
 }
 
 static void update_state(can_node_t *n) {
-  if (n->tec >= 256) n->state = NODE_BUS_OFF;             /* le nœud se déconnecte tout seul */
+  if (n->tec >= 256) n->state = NODE_BUS_OFF;             /* the node disconnects itself */
   else if (n->tec >= 128 || n->rec >= 128) n->state = NODE_ERROR_PASSIVE;
   else n->state = NODE_ERROR_ACTIVE;
 }
@@ -40,7 +40,7 @@ int can_receive(can_bus_t *b, int node, can_frame_t *f) {
 }
 
 int can_bus_step(can_bus_t *b) {
-  /* 1. Arbitrage entre tous les nœuds qui veulent émettre */
+  /* 1. Arbitration between all nodes that want to transmit */
   const can_frame_t *cand[CAN_MAX_NODES]; int who[CAN_MAX_NODES], lost[CAN_MAX_NODES], n = 0;
   for (int i = 0; i < b->n_nodes; i++) {
     can_frame_t *f = q_peek(&b->nodes[i].tx);
@@ -57,18 +57,18 @@ int can_bus_step(can_bus_t *b) {
   int tx = who[w];
   const can_frame_t *f = cand[w];
 
-  /* 2. Émission au bit près (avec erreur éventuelle injectée sur le câble) */
+  /* 2. Bit-level transmission (with an optional error injected on the wire) */
   b->last_nbits = can_encode(f, b->last_bits, b->last_stuff);
   b->last_frame = *f; b->last_sender = tx;
-  if (b->inject_error > 0 && (b->inject_node < 0 || b->inject_node == tx)) {   /* parasite sur un bit */
+  if (b->inject_error > 0 && (b->inject_node < 0 || b->inject_node == tx)) {   /* noise on one bit */
     b->last_bits[25] ^= 1; b->inject_error--;
   }
-  b->bits_total += b->last_nbits + 3;                                        /* + intertrame */
+  b->bits_total += b->last_nbits + 3;                                        /* + interframe space */
 
-  /* 3. Chaque récepteur vérifie la trame */
+  /* 3. Every receiver checks the frame */
   can_frame_t rx;
   can_err_t e = can_decode(b->last_bits, b->last_nbits, &rx);
-  if (e != CAN_OK) {                                     /* trame d'erreur → réémission automatique */
+  if (e != CAN_OK) {                                     /* error frame → automatic retransmission */
     b->frames_err++;
     b->bits_total += 14;
     b->nodes[tx].tec += 8;

@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "author": "Reseau CAN automobile",
+  "author": "Automotive CAN network",
   "editor": "wokwi",
   "parts": [
     { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
     { "type": "board-ssd1306", "id": "oled1", "top": 40, "left": 200, "attrs": { "i2cAddress": "0x3c" } },
     { "type": "wokwi-potentiometer", "id": "pedal", "top": -110, "left": -150, "attrs": { "value": "0" } },
-    { "type": "wokwi-pushbutton", "id": "btn_brake", "top": 60, "left": -200, "attrs": { "color": "red", "label": "Frein" } },
-    { "type": "wokwi-pushbutton", "id": "btn_fan", "top": 150, "left": -200, "attrs": { "color": "yellow", "label": "Panne ventilo" } },
-    { "type": "wokwi-led", "id": "led_mil", "top": 230, "left": 20, "attrs": { "color": "orange", "label": "MOTEUR" } },
+    { "type": "wokwi-pushbutton", "id": "btn_brake", "top": 60, "left": -200, "attrs": { "color": "red", "label": "Brake" } },
+    { "type": "wokwi-pushbutton", "id": "btn_fan", "top": 150, "left": -200, "attrs": { "color": "yellow", "label": "Fan failure" } },
+    { "type": "wokwi-led", "id": "led_mil", "top": 230, "left": 20, "attrs": { "color": "orange", "label": "ENGINE" } },
     { "type": "wokwi-led", "id": "led_abs", "top": 230, "left": 90, "attrs": { "color": "yellow", "label": "ABS" } },
     { "type": "wokwi-resistor", "id": "r1", "top": 300, "left": 10, "rotate": 90, "attrs": { "value": "220" } },
     { "type": "wokwi-resistor", "id": "r2", "top": 300, "left": 80, "rotate": 90, "attrs": { "value": "220" } }
