@@ -1,6 +1,6 @@
 # 🚗 Automotive CAN network + OBD-II diagnostics (ESP32 + FreeRTOS)
 
-[![Tests](https://github.com/bouabdellah-yacine/automotive-can-obd2/actions/workflows/ci.yml/badge.svg)](https://github.com/bouabdellah-yacine/automotive-can-obd2/actions/workflows/ci.yml)
+[![Tests](https://github.com/bouabdallah-yacine/automotive-can-obd2/actions/workflows/ci.yml/badge.svg)](https://github.com/bouabdallah-yacine/automotive-can-obd2/actions/workflows/ci.yml)
 
 A modern car contains dozens of ECUs talking to each other over a **CAN bus**. This project
 simulates such a network with 4 nodes (engine, ABS, instrument cluster, diagnostic tool) exchanging
